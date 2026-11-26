@@ -22,6 +22,7 @@ export const COLORS = {
 
 // Paleta de colores seleccionables para el tanque (Tecla V)
 export const TANK_PALETTE: readonly (readonly [number, number, number, number])[] = [
+  [0.92, 0.42, 0.62, 1.0], // Rosado corazones
   [0.24, 0.34, 0.22, 1.0], // Verde militar
   [0.22, 0.24, 0.26, 1.0], // Gris acero
   [0.65, 0.52, 0.32, 1.0], // Arena desierto

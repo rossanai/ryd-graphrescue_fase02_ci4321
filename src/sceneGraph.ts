@@ -1,5 +1,5 @@
 import { mat3, mat4, vec3 } from 'gl-matrix';
-import { Color, createFixedFunction } from './vendor/ff/ff';
+import { Color, createFixedFunction, TEXTURE_2D, TEXTURE_UNIT } from './vendor/ff/ff';
 
 export type FF = ReturnType<typeof createFixedFunction>;
 
@@ -10,7 +10,7 @@ export interface GPUMesh {
 
 export class SceneNode {
   public position: vec3 = vec3.fromValues(0, 0, 0);
-  public rotation: vec3 = vec3.fromValues(0, 0, 0); // Euler [rx, ry, rz] en radianes
+  public rotation: vec3 = vec3.fromValues(0, 0, 0);
   public scale: vec3 = vec3.fromValues(1, 1, 1);
 
   public localMatrix: mat4 = mat4.create();
@@ -18,6 +18,7 @@ export class SceneNode {
   public children: SceneNode[] = [];
 
   public mesh: GPUMesh | null = null;
+  public texture: WebGLTexture | null = null;
   public color: Color = [1, 1, 1, 1];
   public shininess = 20;
   public visible = true;
@@ -57,6 +58,14 @@ export class SceneNode {
     if (!this.visible) return;
 
     if (this.mesh) {
+      if (this.texture) {
+        gl.activeTexture(gl.TEXTURE0 + TEXTURE_UNIT);
+        gl.bindTexture(gl.TEXTURE_2D, this.texture);
+        ff.enable(TEXTURE_2D);
+      } else {
+        ff.disable(TEXTURE_2D);
+      }
+
       ff.setMaterial({
         ambient: this.color,
         diffuse: this.color,

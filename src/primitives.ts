@@ -188,4 +188,54 @@ export function createCylinder(radius: number, length: number, radialSegments = 
     vertices: new Float32Array(vertices),
     indices: new Uint16Array(indices),
   };
+  
+}
+
+// Cubo para Skybox (caras apuntando hacia el interior)
+export function createSkyboxCube(size = 1.0): MeshData {
+  const h = size / 2;
+
+  const vertices = new Float32Array([
+    // +Z (frente)
+     h, -h,  h,   0,  0, -1,   0, 0,
+    -h, -h,  h,   0,  0, -1,   1, 0,
+    -h,  h,  h,   0,  0, -1,   1, 1,
+     h,  h,  h,   0,  0, -1,   0, 1,
+    // -Z (atrás)
+    -h, -h, -h,   0,  0,  1,   0, 0,
+     h, -h, -h,   0,  0,  1,   1, 0,
+     h,  h, -h,   0,  0,  1,   1, 1,
+    -h,  h, -h,   0,  0,  1,   0, 1,
+    // +X (derecha)
+     h, -h, -h,  -1,  0,  0,   0, 0,
+     h, -h,  h,  -1,  0,  0,   1, 0,
+     h,  h,  h,  -1,  0,  0,   1, 1,
+     h,  h, -h,  -1,  0,  0,   0, 1,
+    // -X (izquierda)
+    -h, -h,  h,   1,  0,  0,   0, 0,
+    -h, -h, -h,   1,  0,  0,   1, 0,
+    -h,  h, -h,   1,  0,  0,   1, 1,
+    -h,  h,  h,   1,  0,  0,   0, 1,
+    // +Y (arriba - cielo)
+    -h,  h, -h,   0, -1,  0,   0, 0.75,
+     h,  h, -h,   0, -1,  0,   1, 0.75,
+     h,  h,  h,   0, -1,  0,   1, 1.0,
+    -h,  h,  h,   0, -1,  0,   0, 1.0,
+    // -Y (abajo - horizonte)
+    -h, -h,  h,   0,  1,  0,   0, 0.0,
+     h, -h,  h,   0,  1,  0,   1, 0.0,
+     h, -h, -h,   0,  1,  0,   1, 0.25,
+    -h, -h, -h,   0,  1,  0,   0, 0.25,
+  ]);
+
+  const indices = new Uint16Array([
+     0,  1,  2,   0,  2,  3,
+     4,  5,  6,   4,  6,  7,
+     8,  9, 10,   8, 10, 11,
+    12, 13, 14,  12, 14, 15,
+    16, 17, 18,  16, 18, 19,
+    20, 21, 22,  20, 22, 23,
+  ]);
+
+  return { vertices, indices };
 }

@@ -1,6 +1,6 @@
 import './style.css';
 import { mat3, mat4, vec3 } from 'gl-matrix';
-import { ATTRIB, createFixedFunction, LIGHTING } from './vendor/ff/ff';
+import { ATTRIB, createFixedFunction, LIGHTING, TEXTURE_2D, TEXTURE_UNIT } from './vendor/ff/ff';
 import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
@@ -19,12 +19,16 @@ import {
 } from './constants';
 import {
   createPlane,
+  createQuad,
   createBox,
+  createSkyboxCube,
   createCylinder,
   createSphere,
   MeshData,
 } from './primitives';
 import { FF, GPUMesh, SceneNode } from './sceneGraph';
+import { createGameTextures } from './textures';
+import { AABB, checkAABBCollision } from './collision';
 
 interface DynamicLineMesh {
   vao: WebGLVertexArrayObject;
@@ -105,45 +109,90 @@ function setupState(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): void
 
 function setupLighting(ff: FF): void {
   ff.enable(LIGHTING);
-  ff.setGlobalAmbient([0.35, 0.35, 0.38, 1.0]);
+  ff.setGlobalAmbient([0.4, 0.4, 0.42, 1.0]);
 
   ff.setLight(0, {
     position: [0.6, 1.0, 0.5, 0.0],
-    ambient: [0.2, 0.2, 0.2, 1.0],
+    ambient: [0.25, 0.25, 0.25, 1.0],
     diffuse: [1.0, 0.98, 0.92, 1.0],
-    specular: [0.6, 0.6, 0.6, 1.0],
+    specular: [0.5, 0.5, 0.5, 1.0],
   });
   ff.enableLight(0);
 }
 
 // Objetivos de la escena
 const TARGETS = [
-  { x: -8.0, y: 5.5, z: -12.0 },
-  { x: 0.0, y: 7.0, z: -24.0 },
-  { x: 10.0, y: 8.0, z: -38.0 },
+  { x: -10.0, y: 5.5, z: -12.0 },
+  { x: 0.0, y: 7.0, z: -26.0 },
+  { x: 12.0, y: 8.0, z: -40.0 },
+] as const;
+
+// Obstáculos 3D (cajas/paredes) con sus dimensiones para AABB
+const OBSTACLE_SPECS = [
+  { x: -7.0, y: 1.5, z: 0.0, w: 3.5, h: 3.0, d: 3.5 },
+  { x: 8.0, y: 1.5, z: -2.0, w: 4.0, h: 3.0, d: 3.0 },
+  { x: 0.0, y: 1.25, z: -10.0, w: 5.0, h: 2.5, d: 2.5 },
+  { x: -14.0, y: 2.0, z: -22.0, w: 3.5, h: 4.0, d: 3.5 },
+  { x: 14.0, y: 2.0, z: -20.0, w: 3.5, h: 4.0, d: 3.5 },
+] as const;
+
+const OBSTACLE_AABBS: AABB[] = OBSTACLE_SPECS.map((o) => ({
+  x: o.x,
+  y: o.y,
+  z: o.z,
+  halfW: o.w / 2,
+  halfH: o.h / 2,
+  halfD: o.d / 2,
+}));
+
+// Posiciones de los billboards cilíndricos (arbustos decorativos)
+const BUSH_POSITIONS = [
+  // Laterales cercanos y medios
+  { x: -16.0, z: 18.0, scale: 3.6 },
+  { x: 17.0, z: 16.0, scale: 3.4 },
+  { x: -23.0, z: 8.0, scale: 4.2 },
+  { x: 24.0, z: 6.0, scale: 4.0 },
+  { x: -12.0, z: 4.5, scale: 2.7 },
+  { x: 13.5, z: 3.5, scale: 2.9 },
+  // Junto a los obstáculos
+  { x: -10.2, z: -0.5, scale: 2.8 },
+  { x: 11.2, z: -2.5, scale: 3.0 },
+  { x: -3.6, z: -10.2, scale: 2.5 },
+  { x: 3.8, z: -10.0, scale: 2.6 },
+  // Zona media y fondo
+  { x: -22.0, z: -14.0, scale: 4.4 },
+  { x: 22.0, z: -15.0, scale: 4.1 },
+  { x: -17.5, z: -23.0, scale: 3.2 },
+  { x: 17.5, z: -21.0, scale: 3.3 },
+  { x: -25.0, z: -32.0, scale: 4.8 },
+  { x: 25.0, z: -34.0, scale: 4.6 },
+  { x: -14.0, z: -44.0, scale: 4.2 },
+  { x: 0.0, z: -48.0, scale: 4.5 },
+  { x: 15.0, z: -45.0, scale: 4.3 },
 ] as const;
 
 let activeTargets = [true, true, true];
 let score = 0;
 
-// Estado del tanque
 const MIN_PITCH = 5 * (Math.PI / 180);
 const MAX_PITCH = 80 * (Math.PI / 180);
 
 const TANK = {
   x: 0.0,
-  z: 10.0,
-  yaw: 0.0,         // Rotación de la base (A/D)
-  turretYaw: 0.0,   // Rotación de la torreta relativa a la base (Flechas Izq/Der)
-  pitchAngle: 25 * (Math.PI / 180), // Elevación del cañón (Flechas Arr/Abj)
+  z: 14.0,
+  yaw: 0.0,
+  turretYaw: 0.0,
+  pitchAngle: 25 * (Math.PI / 180),
   moveSpeed: 12.0,
   turnSpeed: 1.8,
   turretSpeed: 2.0,
   pitchSpeed: 1.1,
   colorIndex: 0,
+  halfW: 1.5,
+  halfH: 1.1,
+  halfD: 1.8,
 };
 
-// Cámaras: 0 = Tercera Persona, 1 = Cenital, 2 = Primera Persona
 type CameraMode = 0 | 1 | 2;
 let currentCamera: CameraMode = 0;
 
@@ -171,26 +220,42 @@ const TRACKED_KEYS = new Set([
 function run(canvas: HTMLCanvasElement): void {
   const gl = getContext(canvas);
   const ff = createFixedFunction(gl, { debug: true });
+  const textures = createGameTextures(gl);
 
   const meshes = {
     ground: uploadMesh(gl, createPlane(FIELD_WIDTH, FIELD_DEPTH, 16)),
     box: uploadMesh(gl, createBox(1.0, 1.0, 1.0)),
+    skybox: uploadMesh(gl, createSkyboxCube(160.0)),
+    quad: uploadMesh(gl, createQuad(1.0, 1.0)),
     sphere: uploadMesh(gl, createSphere(TARGET_RADIUS, 28, 28)),
     cylinder: uploadMesh(gl, createCylinder(CANNON_RADIUS, CANNON_LENGTH, 28)),
     trajectory: createDynamicLineMesh(gl, 400),
   };
 
-  // --- CONSTRUCCIÓN DEL ÁRBOL DE ESCENA ---
+  // --- ÁRBOL DE ESCENA OPACO ---
   const sceneRoot = new SceneNode();
 
-  // Suelo
+  // Suelo texturizado
   const groundNode = new SceneNode();
   groundNode.mesh = meshes.ground;
-  groundNode.color = COLORS.GROUND;
+  groundNode.texture = textures.ground;
+  groundNode.color = [1.0, 1.0, 1.0, 1.0];
   groundNode.shininess = 5;
   sceneRoot.addChild(groundNode);
 
-  // Nodos de Objetivos
+  // Obstáculos 3D texturizados
+  for (const obs of OBSTACLE_SPECS) {
+    const obsNode = new SceneNode();
+    obsNode.position = vec3.fromValues(obs.x, obs.y, obs.z);
+    obsNode.scale = vec3.fromValues(obs.w, obs.h, obs.d);
+    obsNode.mesh = meshes.box;
+    obsNode.texture = textures.crate;
+    obsNode.color = [1.0, 1.0, 1.0, 1.0];
+    obsNode.shininess = 15;
+    sceneRoot.addChild(obsNode);
+  }
+
+  // Objetivos
   const targetNodes = TARGETS.map((t) => {
     const node = new SceneNode();
     node.position = vec3.fromValues(t.x, t.y, t.z);
@@ -201,7 +266,7 @@ function run(canvas: HTMLCanvasElement): void {
     return node;
   });
 
-  // Jerarquía del Tanque: Base -> Torreta -> Cañón -> Punta
+  // Jerarquía del Tanque (con textura neutra teñida por el color activo)
   const tankBaseNode = new SceneNode();
   sceneRoot.addChild(tankBaseNode);
 
@@ -210,10 +275,10 @@ function run(canvas: HTMLCanvasElement): void {
   tankBodyMeshNode.position = vec3.fromValues(0, bodyHeight / 2, 0);
   tankBodyMeshNode.scale = vec3.fromValues(2.6, bodyHeight, 3.4);
   tankBodyMeshNode.mesh = meshes.box;
+  tankBodyMeshNode.texture = textures.tankCamo;
   tankBodyMeshNode.color = TANK_PALETTE[TANK.colorIndex];
   tankBaseNode.addChild(tankBodyMeshNode);
 
-  // Indicadores de fuerza en la parte trasera del tanque
   const barOffsetsX = [-0.65, 0.0, 0.65];
   const powerBarNodes = barOffsetsX.map((ox) => {
     const bar = new SceneNode();
@@ -225,7 +290,6 @@ function run(canvas: HTMLCanvasElement): void {
     return bar;
   });
 
-  // Torreta giratoria sobre la base
   const turretHeadNode = new SceneNode();
   turretHeadNode.position = vec3.fromValues(0, bodyHeight + 0.3, 0);
   tankBaseNode.addChild(turretHeadNode);
@@ -234,10 +298,10 @@ function run(canvas: HTMLCanvasElement): void {
   const turretDomeNode = new SceneNode();
   turretDomeNode.scale = vec3.fromValues(jointScale * 1.3, jointScale, jointScale * 1.3);
   turretDomeNode.mesh = meshes.sphere;
+  turretDomeNode.texture = textures.tankCamo;
   turretDomeNode.color = TANK_PALETTE[TANK.colorIndex];
   turretHeadNode.addChild(turretDomeNode);
 
-  // Pivote del cañón (inclinación vertical)
   const cannonPivotNode = new SceneNode();
   turretHeadNode.addChild(cannonPivotNode);
 
@@ -247,12 +311,10 @@ function run(canvas: HTMLCanvasElement): void {
   cannonBarrelNode.shininess = 30;
   cannonPivotNode.addChild(cannonBarrelNode);
 
-  // Nodo vacío en la punta exacta del cañón
   const muzzleNode = new SceneNode();
   muzzleNode.position = vec3.fromValues(0, 0, -CANNON_LENGTH);
   cannonPivotNode.addChild(muzzleNode);
 
-  // Proyectil listo en la boca del cañón
   const projScale = PROJECTILE_RADIUS / TARGET_RADIUS;
   const attachedProjectileNode = new SceneNode();
   attachedProjectileNode.scale = vec3.fromValues(projScale, projScale, projScale);
@@ -261,7 +323,6 @@ function run(canvas: HTMLCanvasElement): void {
   attachedProjectileNode.shininess = 40;
   muzzleNode.addChild(attachedProjectileNode);
 
-  // Proyectil en vuelo (hijo directo de sceneRoot en coordenadas de mundo)
   const flyingProjectileNode = new SceneNode();
   flyingProjectileNode.scale = vec3.fromValues(projScale, projScale, projScale);
   flyingProjectileNode.mesh = meshes.sphere;
@@ -270,7 +331,20 @@ function run(canvas: HTMLCanvasElement): void {
   flyingProjectileNode.visible = false;
   sceneRoot.addChild(flyingProjectileNode);
 
-  // Vectores auxiliares para cálculos 3D
+  // --- ÁRBOL DE BILLBOARDS CILÍNDRICOS (Transparentes) ---
+  const billboardRoot = new SceneNode();
+  const bushNodes = BUSH_POSITIONS.map((b) => {
+    const node = new SceneNode();
+    node.position = vec3.fromValues(b.x, b.scale / 2, b.z);
+    node.scale = vec3.fromValues(b.scale, b.scale, 1.0);
+    node.mesh = meshes.quad;
+    node.texture = textures.bush;
+    node.color = [1.0, 1.0, 1.0, 1.0];
+    node.shininess = 5;
+    billboardRoot.addChild(node);
+    return node;
+  });
+
   const pivotWorldPos = vec3.create();
   const muzzleWorldPos = vec3.create();
   const cannonDir = vec3.create();
@@ -300,7 +374,7 @@ function run(canvas: HTMLCanvasElement): void {
     activeTargets = [true, true, true];
     score = 0;
     TANK.x = 0.0;
-    TANK.z = 10.0;
+    TANK.z = 14.0;
     TANK.yaw = 0.0;
     TANK.turretYaw = 0.0;
     TANK.pitchAngle = 25 * (Math.PI / 180);
@@ -384,12 +458,13 @@ function run(canvas: HTMLCanvasElement): void {
   }
 
   const viewMatrix = mat4.create();
+  const cameraEyePos = vec3.create();
   const projectionMatrix = mat4.perspective(
     mat4.create(),
     Math.PI / 3.6,
     CANVAS_WIDTH / CANVAS_HEIGHT,
     0.1,
-    250.0
+    300.0
   );
 
   function updateCamera(): void {
@@ -397,31 +472,37 @@ function run(canvas: HTMLCanvasElement): void {
     const fwdZ = -Math.cos(TANK.yaw);
 
     if (currentCamera === 0) {
-      // Tercera persona siguiendo al tanque
+      vec3.set(cameraEyePos, TANK.x - fwdX * 13.0, 6.5, TANK.z - fwdZ * 13.0);
       mat4.lookAt(
         viewMatrix,
-        [TANK.x - fwdX * 13.0, 6.5, TANK.z - fwdZ * 13.0],
+        cameraEyePos,
         [TANK.x + fwdX * 4.0, 2.2, TANK.z + fwdZ * 4.0],
         [0, 1, 0]
       );
     } else if (currentCamera === 1) {
-      // Vista cenital (GTA I)
+      vec3.set(cameraEyePos, TANK.x, 32.0, TANK.z);
       mat4.lookAt(
         viewMatrix,
-        [TANK.x, 32.0, TANK.z],
+        cameraEyePos,
         [TANK.x, 0.0, TANK.z],
         [0, 0, -1]
       );
     } else {
-      // Primera persona desde la punta del cañón
       getMuzzleSpawnAndDirection();
-      const eyeX = muzzleWorldPos[0] + cannonDir[0] * 0.25;
-      const eyeY = muzzleWorldPos[1] + cannonDir[1] * 0.25;
-      const eyeZ = muzzleWorldPos[2] + cannonDir[2] * 0.25;
+      vec3.set(
+        cameraEyePos,
+        muzzleWorldPos[0] + cannonDir[0] * 0.25,
+        muzzleWorldPos[1] + cannonDir[1] * 0.25,
+        muzzleWorldPos[2] + cannonDir[2] * 0.25
+      );
       mat4.lookAt(
         viewMatrix,
-        [eyeX, eyeY, eyeZ],
-        [eyeX + cannonDir[0] * 10.0, eyeY + cannonDir[1] * 10.0, eyeZ + cannonDir[2] * 10.0],
+        cameraEyePos,
+        [
+          cameraEyePos[0] + cannonDir[0] * 10.0,
+          cameraEyePos[1] + cannonDir[1] * 10.0,
+          cameraEyePos[2] + cannonDir[2] * 10.0,
+        ],
         [0, 1, 0]
       );
     }
@@ -431,11 +512,9 @@ function run(canvas: HTMLCanvasElement): void {
   }
 
   function update(dt: number): void {
-    // Rotación de la base del tanque (A/D)
     if (keysPressed['a'] || keysPressed['A']) TANK.yaw += TANK.turnSpeed * dt;
     if (keysPressed['d'] || keysPressed['D']) TANK.yaw -= TANK.turnSpeed * dt;
 
-    // Avance / retroceso en la dirección del tanque (W/S)
     const fwdX = -Math.sin(TANK.yaw);
     const fwdZ = -Math.cos(TANK.yaw);
 
@@ -448,22 +527,39 @@ function run(canvas: HTMLCanvasElement): void {
       TANK.z -= fwdZ * TANK.moveSpeed * dt;
     }
 
-    // Limitar movimiento al área del suelo
+    // Límites del mapa
     const maxHalfW = FIELD_WIDTH / 2 - 2.0;
     const maxHalfD = FIELD_DEPTH / 2 - 2.0;
     TANK.x = Math.max(-maxHalfW, Math.min(maxHalfW, TANK.x));
     TANK.z = Math.max(-maxHalfD, Math.min(maxHalfD, TANK.z));
 
-    // Rotación horizontal de la torreta (Flechas Izq/Der)
+    // Colisión AABB Tanque vs Obstáculos
+    const tankBox: AABB = {
+      x: TANK.x,
+      y: TANK.halfH,
+      z: TANK.z,
+      halfW: TANK.halfW,
+      halfH: TANK.halfH,
+      halfD: TANK.halfD,
+    };
+
+    for (const obsBox of OBSTACLE_AABBS) {
+      const [hit, correction] = checkAABBCollision(tankBox, obsBox);
+      if (hit) {
+        TANK.x += correction[0];
+        TANK.z += correction[2];
+        tankBox.x = TANK.x;
+        tankBox.z = TANK.z;
+      }
+    }
+
     if (keysPressed['ArrowLeft']) TANK.turretYaw += TANK.turretSpeed * dt;
     if (keysPressed['ArrowRight']) TANK.turretYaw -= TANK.turretSpeed * dt;
 
-    // Elevación del cañón (Flechas Arr/Abj)
     if (keysPressed['ArrowUp']) TANK.pitchAngle += TANK.pitchSpeed * dt;
     if (keysPressed['ArrowDown']) TANK.pitchAngle -= TANK.pitchSpeed * dt;
     TANK.pitchAngle = Math.max(MIN_PITCH, Math.min(MAX_PITCH, TANK.pitchAngle));
 
-    // Actualizar transformaciones del árbol de escena
     tankBaseNode.position[0] = TANK.x;
     tankBaseNode.position[2] = TANK.z;
     tankBaseNode.rotation[1] = TANK.yaw;
@@ -471,15 +567,12 @@ function run(canvas: HTMLCanvasElement): void {
     turretHeadNode.rotation[1] = TANK.turretYaw;
     cannonPivotNode.rotation[0] = TANK.pitchAngle;
 
-    // Actualizar color de las barras de potencia
     for (let b = 0; b < 3; b++) {
       powerBarNodes[b].color = b + 1 <= powerLevel ? [0.2, 0.9, 0.2, 1.0] : [0.0, 0.4, 0.0, 1.0];
     }
 
-    // Ocultar bala en la punta si está volando o si estamos en 1ra persona
     attachedProjectileNode.visible = !PROJECTILE.isFlying && currentCamera !== 2;
 
-    // Actualizar matrices de mundo antes de disparar o mover cámara
     sceneRoot.updateWorldMatrix();
 
     // Física del proyectil
@@ -493,18 +586,38 @@ function run(canvas: HTMLCanvasElement): void {
         PROJECTILE.isFlying = false;
       }
 
-      for (let i = 0; i < TARGETS.length; i++) {
-        if (!activeTargets[i]) continue;
-        const t = TARGETS[i];
-        const dx = PROJECTILE.x - t.x;
-        const dy = PROJECTILE.y - t.y;
-        const dz = PROJECTILE.z - t.z;
-        if (Math.hypot(dx, dy, dz) <= TARGET_RADIUS + PROJECTILE_RADIUS) {
-          activeTargets[i] = false;
-          targetNodes[i].visible = false;
+      // Colisión proyectil vs obstáculos AABB
+      const projBox: AABB = {
+        x: PROJECTILE.x,
+        y: PROJECTILE.y,
+        z: PROJECTILE.z,
+        halfW: PROJECTILE_RADIUS,
+        halfH: PROJECTILE_RADIUS,
+        halfD: PROJECTILE_RADIUS,
+      };
+      for (const obsBox of OBSTACLE_AABBS) {
+        const [hitObs] = checkAABBCollision(projBox, obsBox);
+        if (hitObs) {
           PROJECTILE.isFlying = false;
-          score += 100;
           break;
+        }
+      }
+
+      // Colisión proyectil vs objetivos esféricos
+      if (PROJECTILE.isFlying) {
+        for (let i = 0; i < TARGETS.length; i++) {
+          if (!activeTargets[i]) continue;
+          const t = TARGETS[i];
+          const dx = PROJECTILE.x - t.x;
+          const dy = PROJECTILE.y - t.y;
+          const dz = PROJECTILE.z - t.z;
+          if (Math.hypot(dx, dy, dz) <= TARGET_RADIUS + PROJECTILE_RADIUS) {
+            activeTargets[i] = false;
+            targetNodes[i].visible = false;
+            PROJECTILE.isFlying = false;
+            score += 100;
+            break;
+          }
         }
       }
     }
@@ -524,17 +637,33 @@ function run(canvas: HTMLCanvasElement): void {
 
   const normalMatScratch = mat3.create();
   const identityMat4 = mat4.create();
+  const skyboxModelMat = mat4.create();
 
   function render(): void {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     updateCamera();
 
-    // Dibujar todo el árbol de escena
+    // 1. Dibujar Skybox centrado en la cámara activa
+    gl.depthMask(false);
+    ff.disable(LIGHTING);
+    ff.enable(TEXTURE_2D);
+    ff.setColor([1.0, 1.0, 1.0, 1.0]);
+    gl.activeTexture(gl.TEXTURE0 + TEXTURE_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, textures.sky);
+    mat4.fromTranslation(skyboxModelMat, cameraEyePos);
+    ff.setModelMatrix(skyboxModelMat);
+    gl.bindVertexArray(meshes.skybox.vao);
+    ff.drawElements(gl.TRIANGLES, meshes.skybox.indexCount, gl.UNSIGNED_SHORT, 0);
+    gl.depthMask(true);
+    ff.enable(LIGHTING);
+
+    // 2. Dibujar objetos opacos del árbol de escena
     sceneRoot.render(gl, ff, normalMatScratch);
 
-    // Previsualización de la trayectoria
+    // 3. Previsualización de trayectoria
     if (!PROJECTILE.isFlying && meshes.trajectory.vertexCount > 1) {
       ff.disable(LIGHTING);
+      ff.disable(TEXTURE_2D);
       ff.setColor(COLORS.TRAJECTORY_LINE);
       ff.setModelMatrix(identityMat4);
 
@@ -542,6 +671,29 @@ function run(canvas: HTMLCanvasElement): void {
       ff.drawArrays(gl.LINE_STRIP, 0, meshes.trajectory.vertexCount);
       ff.enable(LIGHTING);
     }
+
+// 4. Rotación cilíndrica en Y + ordenamiento back-to-front para transparencia limpia
+    for (const bush of bushNodes) {
+      bush.rotation[1] = Math.atan2(
+        cameraEyePos[0] - bush.position[0],
+        cameraEyePos[2] - bush.position[2]
+      );
+    }
+    billboardRoot.children.sort((a, b) => {
+      const distA =
+        (a.position[0] - cameraEyePos[0]) ** 2 + (a.position[2] - cameraEyePos[2]) ** 2;
+      const distB =
+        (b.position[0] - cameraEyePos[0]) ** 2 + (b.position[2] - cameraEyePos[2]) ** 2;
+      return distB - distA;
+    });
+    billboardRoot.updateWorldMatrix();
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.depthMask(false);
+    billboardRoot.render(gl, ff, normalMatScratch);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
   }
 
   setupState(gl, canvas);
