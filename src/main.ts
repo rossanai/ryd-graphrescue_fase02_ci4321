@@ -99,6 +99,56 @@ function createDynamicLineMesh(gl: WebGL2RenderingContext, maxVertices = 400): D
   return lineMesh;
 }
 
+interface DynamicTextMesh {
+  mesh: GPUMesh;
+  setText: (text: string) => void;
+}
+
+// Creación de una malla dinámica para textos que cambian en tiempo de ejecución
+function createDynamicTextMesh(
+  gl: WebGL2RenderingContext,
+  initialText = '',
+  scale = 2.0
+): DynamicTextMesh {
+  const vbo = gl.createBuffer()!;
+  const ebo = gl.createBuffer()!;
+  const vao = gl.createVertexArray()!;
+
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+
+  gl.enableVertexAttribArray(ATTRIB.POSITION);
+  gl.vertexAttribPointer(ATTRIB.POSITION, 3, gl.FLOAT, false, STRIDE_BYTES, 0);
+
+  gl.enableVertexAttribArray(ATTRIB.NORMAL);
+  gl.vertexAttribPointer(ATTRIB.NORMAL, 3, gl.FLOAT, false, STRIDE_BYTES, NORMAL_OFFSET_BYTES);
+
+  gl.enableVertexAttribArray(ATTRIB.UV);
+  gl.vertexAttribPointer(ATTRIB.UV, 2, gl.FLOAT, false, STRIDE_BYTES, UV_OFFSET_BYTES);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+  gl.bindVertexArray(null);
+
+  const mesh: GPUMesh = { vao, indexCount: 0 };
+
+  function setText(text: string): void {
+    const data = createTextMesh(text, scale);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, data.indices, gl.DYNAMIC_DRAW);
+    gl.bindVertexArray(null);
+    mesh.indexCount = data.indices.length;
+  }
+
+  if (initialText) {
+    setText(initialText);
+  }
+
+  return { mesh, setText };
+}
+
 function setupState(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): void {
   canvas.width = CANVAS_WIDTH;
   canvas.height = CANVAS_HEIGHT;
@@ -232,10 +282,10 @@ function run(canvas: HTMLCanvasElement): void {
     sphere: uploadMesh(gl, createSphere(TARGET_RADIUS, 28, 28)),
     cylinder: uploadMesh(gl, createCylinder(CANNON_RADIUS, CANNON_LENGTH, 28)),
     trajectory: createDynamicLineMesh(gl, 400),
-    uiPanel: uploadMesh(gl, createQuad2D(0.9, 1.0)),
-    camThirdPerson: uploadMesh(gl, createTextMesh('CAM: TERCERA PERSONA', 2.0)),
-    camCenital: uploadMesh(gl, createTextMesh('CAM: CENITAL', 2.0)),
-    camFirstPerson: uploadMesh(gl, createTextMesh('CAM: PRIMERA PERSONA', 2.0)),
+    uiPanel: uploadMesh(gl, createQuad2D(1.0, 1.0)),
+    camThirdPerson: uploadMesh(gl, createTextMesh('CAM: TERCERA PERSONA', 1.5)),
+    camCenital: uploadMesh(gl, createTextMesh('CAM: CENITAL', 1.5)),
+    camFirstPerson: uploadMesh(gl, createTextMesh('CAM: PRIMERA PERSONA', 1.5)),
   };
 
   // --- ÁRBOL DE ESCENA OPACO ---
@@ -356,13 +406,13 @@ function run(canvas: HTMLCanvasElement): void {
 
   // Contenedor de la cámara actual en la esquina superior izquierda
   const cameraHudNode = new SceneNode();
-  cameraHudNode.position = vec3.fromValues(20, 20, 0);
+  cameraHudNode.position = vec3.fromValues(16, 16, 0);
   uiRoot.addChild(cameraHudNode);
 
   // Fondo semitransparente para legibilidad
   const cameraPanelNode = new SceneNode();
-  cameraPanelNode.position = vec3.fromValues(-8, -6, 0);
-  cameraPanelNode.scale = vec3.fromValues(432, 44, 1.0);
+  cameraPanelNode.position = vec3.fromValues(-10, -5, 0);
+  cameraPanelNode.scale = vec3.fromValues(290, 34, 1.0);
   cameraPanelNode.mesh = meshes.uiPanel;
   cameraPanelNode.color = [0.0, 0.0, 0.0, 0.6];
   cameraHudNode.addChild(cameraPanelNode);
@@ -387,6 +437,30 @@ function run(canvas: HTMLCanvasElement): void {
   camFirstPersonNode.texture = textures.font;
   camFirstPersonNode.color = [1.0, 1.0, 1.0, 1.0];
   cameraHudNode.addChild(camFirstPersonNode);
+
+  // Malla dinámica para el texto de puntaje
+  const dynamicScore = createDynamicTextMesh(gl, 'PUNTAJE: 0', 1.5);
+  let displayedScore = -1;
+
+  // Contenedor del puntaje en la parte superior central
+  const scoreHudNode = new SceneNode();
+  scoreHudNode.position = vec3.fromValues(Math.round((CANVAS_WIDTH - 135) / 2), 16, 0);
+  uiRoot.addChild(scoreHudNode);
+
+  // Panel de fondo para el puntaje
+  const scorePanelNode = new SceneNode();
+  scorePanelNode.position = vec3.fromValues(-10, -5, 0);
+  scorePanelNode.scale = vec3.fromValues(155, 34, 1.0);
+  scorePanelNode.mesh = meshes.uiPanel;
+  scorePanelNode.color = [0.0, 0.0, 0.0, 0.6];
+  scoreHudNode.addChild(scorePanelNode);
+
+  // Texto del puntaje con mapeo de textura tipográfica
+  const scoreTextNode = new SceneNode();
+  scoreTextNode.mesh = dynamicScore.mesh;
+  scoreTextNode.texture = textures.font;
+  scoreTextNode.color = [1.0, 1.0, 1.0, 1.0];
+  scoreHudNode.addChild(scoreTextNode);
 
   const pivotWorldPos = vec3.create();
   const muzzleWorldPos = vec3.create();
@@ -692,7 +766,18 @@ function run(canvas: HTMLCanvasElement): void {
     camThirdPersonNode.visible = currentCamera === 0;
     camCenitalNode.visible = currentCamera === 1;
     camFirstPersonNode.visible = currentCamera === 2;
-    cameraPanelNode.scale[0] = currentCamera === 1 ? 286 : 430;
+    cameraPanelNode.scale[0] = currentCamera === 1 ? 182 : 290;
+
+    // Actualización y centrado dinámico del puntaje
+    if (score !== displayedScore) {
+      displayedScore = score;
+      const scoreText = `PUNTAJE: ${score}`;
+      dynamicScore.setText(scoreText);
+      const scoreWidth = scoreText.length * 13.5;
+      scoreHudNode.position[0] = Math.round((CANVAS_WIDTH - scoreWidth) / 2);
+      scorePanelNode.scale[0] = scoreWidth + 20;
+    }
+
     uiRoot.updateWorldMatrix();
   }
 
