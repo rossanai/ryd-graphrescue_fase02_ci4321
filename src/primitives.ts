@@ -239,3 +239,119 @@ export function createSkyboxCube(size = 1.0): MeshData {
 
   return { vertices, indices };
 }
+
+// Parámetros métricos del mapa de caracteres tipográficos
+const FONT_ATLAS_WIDTH = 145;
+const FONT_ATLAS_HEIGHT = 1412;
+const FONT_CELL_WIDTH = 8;
+const FONT_CELL_HEIGHT = 16;
+const FONT_PITCH_X = 9;
+const FONT_PITCH_Y = 17;
+const FONT_BORDER = 1;
+const FONT_COLS = 16;
+const FONT_FIRST_CODE = 32;
+const FONT_LETTER_SPACING = 1;
+
+// Cálculo de coordenadas UV para un glifo individual
+export function getGlyphUV(code: number): [number, number, number, number] {
+  const safeCode = code >= 32 && code <= 126 ? code : 32;
+  const index = safeCode - FONT_FIRST_CODE;
+  const col = index % FONT_COLS;
+  const row = Math.floor(index / FONT_COLS);
+  const x0 = FONT_BORDER + col * FONT_PITCH_X;
+  const y0 = FONT_BORDER + row * FONT_PITCH_Y;
+  const s0 = x0 / FONT_ATLAS_WIDTH;
+  const s1 = (x0 + FONT_CELL_WIDTH) / FONT_ATLAS_WIDTH;
+  const t1 = 1 - y0 / FONT_ATLAS_HEIGHT;
+  const t0 = 1 - (y0 + FONT_CELL_HEIGHT) / FONT_ATLAS_HEIGHT;
+  return [s0, t0, s1, t1];
+}
+
+// Generación de malla 2D para cadenas de texto basada en mapa de fuentes
+export function createTextMesh(
+  text: string,
+  scale = 1.0,
+  letterSpacing = FONT_LETTER_SPACING
+): MeshData {
+  const vertices = new Float32Array(text.length * 4 * 8);
+  const indices = new Uint16Array(text.length * 6);
+  const charWidth = FONT_CELL_WIDTH * scale;
+  const charHeight = FONT_CELL_HEIGHT * scale;
+  const advance = (FONT_CELL_WIDTH + letterSpacing) * scale;
+
+  for (let i = 0; i < text.length; i++) {
+    const [s0, t0, s1, t1] = getGlyphUV(text.charCodeAt(i));
+    const left = i * advance;
+    const right = left + charWidth;
+    const top = 0.0;
+    const bottom = charHeight;
+
+    const baseV = i * 4;
+    const vOffset = baseV * 8;
+
+    // Vértice 0: inferior izquierdo
+    vertices[vOffset + 0] = left;
+    vertices[vOffset + 1] = bottom;
+    vertices[vOffset + 2] = 0.0;
+    vertices[vOffset + 3] = 0.0;
+    vertices[vOffset + 4] = 0.0;
+    vertices[vOffset + 5] = 1.0;
+    vertices[vOffset + 6] = s0;
+    vertices[vOffset + 7] = t0;
+
+    // Vértice 1: inferior derecho
+    vertices[vOffset + 8] = right;
+    vertices[vOffset + 9] = bottom;
+    vertices[vOffset + 10] = 0.0;
+    vertices[vOffset + 11] = 0.0;
+    vertices[vOffset + 12] = 0.0;
+    vertices[vOffset + 13] = 1.0;
+    vertices[vOffset + 14] = s1;
+    vertices[vOffset + 15] = t0;
+
+    // Vértice 2: superior derecho
+    vertices[vOffset + 16] = right;
+    vertices[vOffset + 17] = top;
+    vertices[vOffset + 18] = 0.0;
+    vertices[vOffset + 19] = 0.0;
+    vertices[vOffset + 20] = 0.0;
+    vertices[vOffset + 21] = 1.0;
+    vertices[vOffset + 22] = s1;
+    vertices[vOffset + 23] = t1;
+
+    // Vértice 3: superior izquierdo
+    vertices[vOffset + 24] = left;
+    vertices[vOffset + 25] = top;
+    vertices[vOffset + 26] = 0.0;
+    vertices[vOffset + 27] = 0.0;
+    vertices[vOffset + 28] = 0.0;
+    vertices[vOffset + 29] = 1.0;
+    vertices[vOffset + 30] = s0;
+    vertices[vOffset + 31] = t1;
+
+    const iOffset = i * 6;
+    indices[iOffset + 0] = baseV;
+    indices[iOffset + 1] = baseV + 1;
+    indices[iOffset + 2] = baseV + 2;
+    indices[iOffset + 3] = baseV;
+    indices[iOffset + 4] = baseV + 2;
+    indices[iOffset + 5] = baseV + 3;
+  }
+
+  return { vertices, indices };
+}
+
+// Cuadrilátero 2D con origen en la esquina superior izquierda
+export function createQuad2D(width = 1.0, height = 1.0): MeshData {
+  const vertices = new Float32Array([
+    0.0, height, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,
+    width, height, 0.0, 0.0, 0.0, 1.0,   1.0, 0.0,
+    width, 0.0, 0.0,    0.0, 0.0, 1.0,   1.0, 1.0,
+    0.0, 0.0, 0.0,      0.0, 0.0, 1.0,   0.0, 1.0,
+  ]);
+  const indices = new Uint16Array([
+    0, 1, 2,
+    0, 2, 3,
+  ]);
+  return { vertices, indices };
+}

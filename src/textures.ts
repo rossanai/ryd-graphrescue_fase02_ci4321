@@ -6,6 +6,7 @@ export interface GameTextures {
   tankCamo: WebGLTexture;
   bush: WebGLTexture;
   sky: WebGLTexture;
+  font: WebGLTexture;
 }
 
 function uploadCanvasToTexture(
@@ -225,6 +226,42 @@ function makeSkyCanvas(): HTMLCanvasElement {
   return c;
 }
 
+// Carga y configuración de textura para tipografía con filtrado nearest
+function uploadFontTexture(
+  gl: WebGL2RenderingContext,
+  texture: WebGLTexture,
+  source: TexImageSource
+): void {
+  gl.activeTexture(gl.TEXTURE0 + TEXTURE_UNIT);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+// Creación de textura de tipografía con respaldo temporal
+function createFontTexture(gl: WebGL2RenderingContext, optionalUrl: string): WebGLTexture {
+  const tex = gl.createTexture()!;
+  const fallback = document.createElement('canvas');
+  fallback.width = 1;
+  fallback.height = 1;
+  uploadFontTexture(gl, tex, fallback);
+
+  const img = new Image();
+  img.onload = () => {
+    uploadFontTexture(gl, tex, img);
+  };
+  img.src = optionalUrl;
+  if (img.complete && img.naturalWidth !== 0) {
+    uploadFontTexture(gl, tex, img);
+  }
+
+  return tex;
+}
+
 export function createGameTextures(gl: WebGL2RenderingContext): GameTextures {
   return {
     ground: createTextureWithOptionalFile(gl, makeGroundCanvas(), './textures/ground.png', true),
@@ -232,5 +269,6 @@ export function createGameTextures(gl: WebGL2RenderingContext): GameTextures {
     tankCamo: createTextureWithOptionalFile(gl, makeNeutralCamoCanvas(), './textures/camo.png', false),
     bush: createTextureWithOptionalFile(gl, makeBushCanvas(), './textures/Bush_2_YELLOWISH GREEN.png', false),
     sky: createTextureWithOptionalFile(gl, makeSkyCanvas(), './textures/sky.png', false),
+    font: createFontTexture(gl, './textures/BoldPixels-white.png'),
   };
 }

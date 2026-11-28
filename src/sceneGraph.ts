@@ -66,6 +66,8 @@ export class SceneNode {
         ff.disable(TEXTURE_2D);
       }
 
+      // Asignación de color base para modos con y sin iluminación
+      ff.setColor(this.color);
       ff.setMaterial({
         ambient: this.color,
         diffuse: this.color,

@@ -20,10 +20,12 @@ import {
 import {
   createPlane,
   createQuad,
+  createQuad2D,
   createBox,
   createSkyboxCube,
   createCylinder,
   createSphere,
+  createTextMesh,
   MeshData,
 } from './primitives';
 import { FF, GPUMesh, SceneNode } from './sceneGraph';
@@ -230,6 +232,10 @@ function run(canvas: HTMLCanvasElement): void {
     sphere: uploadMesh(gl, createSphere(TARGET_RADIUS, 28, 28)),
     cylinder: uploadMesh(gl, createCylinder(CANNON_RADIUS, CANNON_LENGTH, 28)),
     trajectory: createDynamicLineMesh(gl, 400),
+    uiPanel: uploadMesh(gl, createQuad2D(0.9, 1.0)),
+    camThirdPerson: uploadMesh(gl, createTextMesh('CAM: TERCERA PERSONA', 2.0)),
+    camCenital: uploadMesh(gl, createTextMesh('CAM: CENITAL', 2.0)),
+    camFirstPerson: uploadMesh(gl, createTextMesh('CAM: PRIMERA PERSONA', 2.0)),
   };
 
   // --- ÁRBOL DE ESCENA OPACO ---
@@ -345,6 +351,43 @@ function run(canvas: HTMLCanvasElement): void {
     return node;
   });
 
+  // --- ÁRBOL DE ESCENA PARA LA INTERFAZ 2D ---
+  const uiRoot = new SceneNode();
+
+  // Contenedor de la cámara actual en la esquina superior izquierda
+  const cameraHudNode = new SceneNode();
+  cameraHudNode.position = vec3.fromValues(20, 20, 0);
+  uiRoot.addChild(cameraHudNode);
+
+  // Fondo semitransparente para legibilidad
+  const cameraPanelNode = new SceneNode();
+  cameraPanelNode.position = vec3.fromValues(-8, -6, 0);
+  cameraPanelNode.scale = vec3.fromValues(432, 44, 1.0);
+  cameraPanelNode.mesh = meshes.uiPanel;
+  cameraPanelNode.color = [0.0, 0.0, 0.0, 0.6];
+  cameraHudNode.addChild(cameraPanelNode);
+
+  // Etiqueta para cámara en tercera persona
+  const camThirdPersonNode = new SceneNode();
+  camThirdPersonNode.mesh = meshes.camThirdPerson;
+  camThirdPersonNode.texture = textures.font;
+  camThirdPersonNode.color = [1.0, 1.0, 1.0, 1.0];
+  cameraHudNode.addChild(camThirdPersonNode);
+
+  // Etiqueta para cámara cenital
+  const camCenitalNode = new SceneNode();
+  camCenitalNode.mesh = meshes.camCenital;
+  camCenitalNode.texture = textures.font;
+  camCenitalNode.color = [1.0, 1.0, 1.0, 1.0];
+  cameraHudNode.addChild(camCenitalNode);
+
+  // Etiqueta para cámara en primera persona
+  const camFirstPersonNode = new SceneNode();
+  camFirstPersonNode.mesh = meshes.camFirstPerson;
+  camFirstPersonNode.texture = textures.font;
+  camFirstPersonNode.color = [1.0, 1.0, 1.0, 1.0];
+  cameraHudNode.addChild(camFirstPersonNode);
+
   const pivotWorldPos = vec3.create();
   const muzzleWorldPos = vec3.create();
   const cannonDir = vec3.create();
@@ -378,6 +421,7 @@ function run(canvas: HTMLCanvasElement): void {
     TANK.yaw = 0.0;
     TANK.turretYaw = 0.0;
     TANK.pitchAngle = 25 * (Math.PI / 180);
+    currentCamera = 0;
   }
 
   window.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -466,6 +510,16 @@ function run(canvas: HTMLCanvasElement): void {
     0.1,
     300.0
   );
+  const hudProjectionMatrix = mat4.ortho(
+    mat4.create(),
+    0,
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+    0,
+    -1.0,
+    1.0
+  );
+  const identityMat3 = mat3.create();
 
   function updateCamera(): void {
     const fwdX = -Math.sin(TANK.yaw);
@@ -633,6 +687,13 @@ function run(canvas: HTMLCanvasElement): void {
       flyingProjectileNode.position[2] = PROJECTILE.z;
       flyingProjectileNode.updateWorldMatrix();
     }
+
+    // Actualización de visibilidad de las etiquetas de la interfaz según la cámara activa
+    camThirdPersonNode.visible = currentCamera === 0;
+    camCenitalNode.visible = currentCamera === 1;
+    camFirstPersonNode.visible = currentCamera === 2;
+    cameraPanelNode.scale[0] = currentCamera === 1 ? 286 : 430;
+    uiRoot.updateWorldMatrix();
   }
 
   const normalMatScratch = mat3.create();
@@ -694,6 +755,22 @@ function run(canvas: HTMLCanvasElement): void {
     billboardRoot.render(gl, ff, normalMatScratch);
     gl.depthMask(true);
     gl.disable(gl.BLEND);
+
+    // 5. Capa 2D de interfaz gráfica con cámara ortográfica superpuesta
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    ff.disable(LIGHTING);
+    ff.setProjectionMatrix(hudProjectionMatrix);
+    ff.setViewMatrix(identityMat4);
+    ff.setTextureMatrix(identityMat3);
+
+    uiRoot.render(gl, ff, normalMatScratch);
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    ff.enable(LIGHTING);
   }
 
   setupState(gl, canvas);
